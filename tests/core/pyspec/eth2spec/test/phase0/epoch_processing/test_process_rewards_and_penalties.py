@@ -1,32 +1,33 @@
+from random import Random
+
 from eth2spec.test.context import (
+    misc_balances,
+    one_validator_one_gwei_balances,
+    PHASE0,
+    single_phase,
     spec_state_test,
     spec_test,
     with_all_phases,
-    single_phase,
-    with_phases,
-    PHASE0,
     with_custom_state,
+    with_phases,
     zero_activation_threshold,
-    misc_balances,
-    low_single_balance,
-)
-from eth2spec.test.helpers.forks import (
-    is_post_altair,
-)
-from eth2spec.test.helpers.state import (
-    next_epoch,
-    next_slot,
 )
 from eth2spec.test.helpers.attestations import (
     add_attestations_to_state,
     get_valid_attestation,
-    sign_attestation,
     prepare_state_with_attestations,
+    sign_attestation,
 )
-from eth2spec.test.helpers.rewards import leaking
 from eth2spec.test.helpers.attester_slashings import get_indexed_attestation_participants
 from eth2spec.test.helpers.epoch_processing import run_epoch_processing_with
-from random import Random
+from eth2spec.test.helpers.forks import (
+    is_post_altair,
+)
+from eth2spec.test.helpers.rewards import leaking
+from eth2spec.test.helpers.state import (
+    next_epoch,
+    next_slot,
+)
 
 
 def run_process_rewards_and_penalties(spec, state):
@@ -51,23 +52,20 @@ def validate_resulting_balances(spec, pre_state, post_state, attestations):
                     assert post_state.balances[index] == pre_state.balances[index]
                 else:
                     assert post_state.balances[index] < pre_state.balances[index]
+            elif index in attesting_indices:
+                assert post_state.balances[index] > pre_state.balances[index]
             else:
-                if index in attesting_indices:
-                    assert post_state.balances[index] > pre_state.balances[index]
-                else:
-                    assert post_state.balances[index] < pre_state.balances[index]
+                assert post_state.balances[index] < pre_state.balances[index]
+        elif spec.is_in_inactivity_leak(post_state):
+            if index in attesting_indices:
+                # If not proposer but participated optimally, should have exactly neutral balance
+                assert post_state.balances[index] == pre_state.balances[index]
+            else:
+                assert post_state.balances[index] < pre_state.balances[index]
+        elif index in attesting_indices:
+            assert post_state.balances[index] > pre_state.balances[index]
         else:
-            if spec.is_in_inactivity_leak(post_state):
-                if index in attesting_indices:
-                    # If not proposer but participated optimally, should have exactly neutral balance
-                    assert post_state.balances[index] == pre_state.balances[index]
-                else:
-                    assert post_state.balances[index] < pre_state.balances[index]
-            else:
-                if index in attesting_indices:
-                    assert post_state.balances[index] > pre_state.balances[index]
-                else:
-                    assert post_state.balances[index] < pre_state.balances[index]
+            assert post_state.balances[index] < pre_state.balances[index]
 
 
 @with_all_phases
@@ -159,16 +157,18 @@ def test_full_attestations_misc_balances(spec, state):
 
 @with_all_phases
 @spec_test
-@with_custom_state(balances_fn=low_single_balance, threshold_fn=zero_activation_threshold)
+@with_custom_state(
+    balances_fn=one_validator_one_gwei_balances, threshold_fn=zero_activation_threshold
+)
 @single_phase
-def test_full_attestations_one_validator_one_gwei(spec, state):
+def test_full_attestations_default_balances_except_a_validator_with_one_gwei(spec, state):
     attestations = prepare_state_with_attestations(spec, state)
 
     yield from run_process_rewards_and_penalties(spec, state)
 
     # Few assertions. Mainly to check that this extreme case can run without exception
     attesting_indices = spec.get_unslashed_attesting_indices(state, attestations)
-    assert len(attesting_indices) == 1
+    assert len(attesting_indices) == len(state.validators)
 
 
 @with_all_phases

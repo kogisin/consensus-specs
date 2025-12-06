@@ -1,21 +1,24 @@
-from random import Random
 from enum import Enum
-
-from typing import Type
+from random import Random
 
 from eth2spec.utils.ssz.ssz_typing import (
-    View,
     BasicView,
-    uint,
-    Container,
-    List,
-    boolean,
-    Vector,
-    ByteVector,
-    ByteList,
     Bitlist,
     Bitvector,
+    boolean,
+    ByteList,
+    ByteVector,
+    CompatibleUnion,
+    Container,
+    List,
+    ProgressiveBitlist,
+    ProgressiveContainer,
+    ProgressiveList,
+    uint,
+    uint8,
     Union,
+    Vector,
+    View,
 )
 
 # in bytes
@@ -47,7 +50,7 @@ class RandomizationMode(Enum):
 
 def get_random_ssz_object(
     rng: Random,
-    typ: Type[View],
+    typ: type[View],
     max_bytes_length: int,
     max_list_length: int,
     mode: RandomizationMode,
@@ -90,7 +93,7 @@ def get_random_ssz_object(
             return typ(b"\xff" * typ.type_byte_length())
         else:
             return typ(get_random_bytes_list(rng, typ.type_byte_length()))
-    elif issubclass(typ, (boolean, uint)):
+    elif issubclass(typ, boolean | uint):
         # Basic types
         if mode == RandomizationMode.mode_zero:
             return get_min_basic_value(typ)
@@ -98,32 +101,33 @@ def get_random_ssz_object(
             return get_max_basic_value(typ)
         else:
             return get_random_basic_value(rng, typ)
-    elif issubclass(typ, (Vector, Bitvector)):
+    elif issubclass(typ, Vector | Bitvector):
         elem_type = typ.element_cls() if issubclass(typ, Vector) else boolean
         return typ(
             get_random_ssz_object(rng, elem_type, max_bytes_length, max_list_length, mode, chaos)
             for _ in range(typ.vector_length())
         )
-    elif issubclass(typ, List) or issubclass(typ, Bitlist):
-        length = rng.randint(0, min(typ.limit(), max_list_length))
+    elif issubclass(typ, List | ProgressiveList | Bitlist | ProgressiveBitlist):
+        limit = max_list_length
+        # SSZ imposes a hard limit on lists, we can't put in more than that
+        if not issubclass(typ, ProgressiveList | ProgressiveBitlist) and typ.limit() < limit:
+            limit = typ.limit()
+
+        length = rng.randint(0, limit)
         if mode == RandomizationMode.mode_one_count:
             length = 1
         elif mode == RandomizationMode.mode_max_count:
-            length = max_list_length
+            length = limit
         elif mode == RandomizationMode.mode_nil_count:
             length = 0
 
-        if (
-            typ.limit() < length
-        ):  # SSZ imposes a hard limit on lists, we can't put in more than that
-            length = typ.limit()
-
-        elem_type = typ.element_cls() if issubclass(typ, List) else boolean
+        elem_type = boolean if issubclass(typ, Bitlist | ProgressiveBitlist) else typ.element_cls()
+        max_list_length = 1 << (max_list_length.bit_length() >> 1)
         return typ(
             get_random_ssz_object(rng, elem_type, max_bytes_length, max_list_length, mode, chaos)
             for _ in range(length)
         )
-    elif issubclass(typ, Container):
+    elif issubclass(typ, Container | ProgressiveContainer):
         fields = typ.fields()
         # Container
         return typ(
@@ -152,6 +156,22 @@ def get_random_ssz_object(
                 rng, elem_type, max_bytes_length, max_list_length, mode, chaos
             )
         return typ(selector=selector, value=elem)
+    elif issubclass(typ, CompatibleUnion):
+        options = typ.options()
+        selector: uint8
+        if mode == RandomizationMode.mode_zero:
+            selector = min(options.keys())
+        elif mode == RandomizationMode.mode_max:
+            selector = max(options.keys())
+        else:
+            selector = rng.choice(list(options.keys()))
+        elem_type = options[selector]
+        return typ(
+            selector=selector,
+            data=get_random_ssz_object(
+                rng, elem_type, max_bytes_length, max_list_length, mode, chaos
+            ),
+        )
     else:
         raise Exception(f"Type not recognized: typ={typ}")
 

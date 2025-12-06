@@ -3,7 +3,6 @@
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=2 -->
 
 - [Introduction](#introduction)
-- [Containers](#containers)
 - [Helpers](#helpers)
   - [Modified `PayloadAttributes`](#modified-payloadattributes)
   - [`is_data_available`](#is_data_available)
@@ -15,8 +14,6 @@
 ## Introduction
 
 This is the modification of the fork choice accompanying the Deneb upgrade.
-
-## Containers
 
 ## Helpers
 
@@ -31,22 +28,32 @@ class PayloadAttributes(object):
     prev_randao: Bytes32
     suggested_fee_recipient: ExecutionAddress
     withdrawals: Sequence[Withdrawal]
-    parent_beacon_block_root: Root  # [New in Deneb:EIP4788]
+    # [New in Deneb:EIP4788]
+    parent_beacon_block_root: Root
 ```
 
 ### `is_data_available`
 
 *[New in Deneb:EIP4844]*
 
-The implementation of `is_data_available` will become more sophisticated during later scaling upgrades.
-Initially, verification requires every verifying actor to retrieve all matching `Blob`s and `KZGProof`s, and validate them with `verify_blob_kzg_proof_batch`.
+The implementation of `is_data_available` will become more sophisticated during
+later scaling upgrades. Initially, verification requires every verifying actor
+to retrieve all matching `Blob`s and `KZGProof`s, and validate them with
+`verify_blob_kzg_proof_batch`.
 
-The block MUST NOT be considered valid until all valid `Blob`s have been downloaded. Blocks that have been previously validated as available SHOULD be considered available even if the associated `Blob`s have subsequently been pruned.
+The block MUST NOT be considered valid until all valid `Blob`s have been
+downloaded. Blocks that have been previously validated as available SHOULD be
+considered available even if the associated `Blob`s have subsequently been
+pruned.
 
-*Note*: Extraneous or invalid Blobs (in addition to KZG expected/referenced valid blobs) received on the p2p network MUST NOT invalidate a block that is otherwise valid and available.
+*Note*: Extraneous or invalid Blobs (in addition to KZG expected/referenced
+valid blobs) received on the p2p network MUST NOT invalidate a block that is
+otherwise valid and available.
 
 ```python
-def is_data_available(beacon_block_root: Root, blob_kzg_commitments: Sequence[KZGCommitment]) -> bool:
+def is_data_available(
+    beacon_block_root: Root, blob_kzg_commitments: Sequence[KZGCommitment]
+) -> bool:
     # `retrieve_blobs_and_proofs` is implementation and context dependent
     # It returns all the blobs for the given block root, and raises an exception if not available
     # Note: the p2p network does not guarantee sidecar retrieval outside of
@@ -60,7 +67,8 @@ def is_data_available(beacon_block_root: Root, blob_kzg_commitments: Sequence[KZ
 
 ### `on_block`
 
-*Note*: The only modification is the addition of the blob data availability check.
+*Note*: The only modification is the addition of the blob data availability
+check.
 
 ```python
 def on_block(store: Store, signed_block: SignedBeaconBlock) -> None:
@@ -86,9 +94,7 @@ def on_block(store: Store, signed_block: SignedBeaconBlock) -> None:
 
     # [New in Deneb:EIP4844]
     # Check if blob data is available
-    # If not, this block MAY be queued and subsequently considered when blob data becomes available
-    # *Note*: Extraneous or invalid Blobs (in addition to the expected/referenced valid blobs)
-    # received on the p2p network MUST NOT invalidate a block that is otherwise valid and available
+    # If not, this payload MAY be queued and subsequently considered when blob data becomes available
     assert is_data_available(hash_tree_root(block), block.body.blob_kzg_commitments)
 
     # Check the block is valid and compute the post-state
@@ -103,8 +109,11 @@ def on_block(store: Store, signed_block: SignedBeaconBlock) -> None:
     store.block_states[block_root] = state
 
     # Add block timeliness to the store
-    time_into_slot = (store.time - store.genesis_time) % SECONDS_PER_SLOT
-    is_before_attesting_interval = time_into_slot < SECONDS_PER_SLOT // INTERVALS_PER_SLOT
+    seconds_since_genesis = store.time - store.genesis_time
+    time_into_slot_ms = seconds_to_milliseconds(seconds_since_genesis) % SLOT_DURATION_MS
+    epoch = get_current_store_epoch(store)
+    attestation_threshold_ms = get_attestation_due_ms(epoch)
+    is_before_attesting_interval = time_into_slot_ms < attestation_threshold_ms
     is_timely = get_current_slot(store) == block.slot and is_before_attesting_interval
     store.block_timeliness[hash_tree_root(block)] = is_timely
 

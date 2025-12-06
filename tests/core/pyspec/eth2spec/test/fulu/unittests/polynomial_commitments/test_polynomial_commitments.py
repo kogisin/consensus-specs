@@ -1,8 +1,9 @@
 import random
+
 from eth2spec.test.context import (
-    spec_test,
-    single_phase,
     expect_assertion_error,
+    single_phase,
+    spec_test,
     with_fulu_and_later,
 )
 from eth2spec.test.helpers.blob import (
@@ -15,7 +16,6 @@ from eth2spec.utils.bls import BLS_MODULUS
 @spec_test
 @single_phase
 def test_fft(spec):
-
     # in this test we sample a random polynomial in coefficient form
     # then we apply an FFT to get evaluations over the roots of unity
     # we then apply an inverse FFT to the evaluations to get coefficients
@@ -52,7 +52,6 @@ def test_fft(spec):
 @spec_test
 @single_phase
 def test_coset_fft(spec):
-
     # in this test we sample a random polynomial in coefficient form
     # then we apply a Coset FFT to get evaluations over the coset of the roots of unity
     # we then apply an inverse Coset FFT to the evaluations to get coefficients
@@ -131,7 +130,6 @@ def test_verify_cell_kzg_proof_batch_zero_cells(spec):
 @spec_test
 @single_phase
 def test_verify_cell_kzg_proof_batch(spec):
-
     # test with a single blob / commitment
     blob = get_sample_blob(spec)
     commitment = spec.blob_to_kzg_commitment(blob)
@@ -183,12 +181,10 @@ def test_verify_cell_kzg_proof_batch(spec):
 @spec_test
 @single_phase
 def test_verify_cell_kzg_proof_batch_invalid(spec):
-
     # test with a single blob / commitment
     blob = get_sample_blob(spec)
     commitment = spec.blob_to_kzg_commitment(blob)
     cells, proofs = spec.compute_cells_and_kzg_proofs(blob)
-    return
 
     assert len(cells) == len(proofs)
 
@@ -241,23 +237,15 @@ def test_verify_cell_kzg_proof_batch_invalid(spec):
 def test_recover_cells_and_kzg_proofs(spec):
     rng = random.Random(5566)
 
-    # Number of samples we will be recovering from
-    N_SAMPLES = spec.CELLS_PER_EXT_BLOB // 2
-
     # Get the data we will be working with
     blob = get_sample_blob(spec)
 
     # Extend data with Reed-Solomon and split the extended data in cells
     cells, proofs = spec.compute_cells_and_kzg_proofs(blob)
 
-    # Compute the cells we will be recovering from
-    cell_indices = []
-    # First figure out just the indices of the cells
-    for i in range(N_SAMPLES):
-        j = rng.randint(0, spec.CELLS_PER_EXT_BLOB - 1)
-        while j in cell_indices:
-            j = rng.randint(0, spec.CELLS_PER_EXT_BLOB - 1)
-        cell_indices.append(j)
+    # Compute the cells we will be recovering from (50% available)
+    cell_indices = sorted(rng.sample(range(spec.CELLS_PER_EXT_BLOB), spec.CELLS_PER_EXT_BLOB // 2))
+
     # Now the cells themselves
     known_cells = [cells[cell_index] for cell_index in cell_indices]
 

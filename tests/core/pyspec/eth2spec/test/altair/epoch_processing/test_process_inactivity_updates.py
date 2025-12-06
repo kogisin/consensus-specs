@@ -1,24 +1,24 @@
 from random import Random
 
 from eth2spec.test.context import spec_state_test, with_altair_and_later
+from eth2spec.test.helpers.epoch_processing import run_epoch_processing_with
 from eth2spec.test.helpers.inactivity_scores import (
     randomize_inactivity_scores,
     zero_inactivity_scores,
 )
-from eth2spec.test.helpers.state import (
-    next_epoch,
-    next_epoch_via_block,
-    set_full_participation,
-    set_empty_participation,
-)
-from eth2spec.test.helpers.voluntary_exits import exit_validators, get_exited_validators
-from eth2spec.test.helpers.epoch_processing import run_epoch_processing_with
 from eth2spec.test.helpers.random import (
     randomize_attestation_participation,
     randomize_previous_epoch_participation,
     randomize_state,
 )
 from eth2spec.test.helpers.rewards import leaking
+from eth2spec.test.helpers.state import (
+    next_epoch,
+    next_epoch_via_block,
+    set_empty_participation,
+    set_full_participation,
+)
+from eth2spec.test.helpers.voluntary_exits import exit_validators, get_exited_validators
 
 
 def run_process_inactivity_updates(spec, state):
@@ -50,8 +50,10 @@ def test_genesis_random_scores(spec, state):
 
 
 def run_inactivity_scores_test(
-    spec, state, participation_fn=None, inactivity_scores_fn=None, rng=Random(10101)
+    spec, state, participation_fn=None, inactivity_scores_fn=None, rng=None
 ):
+    if rng is None:
+        rng = Random(10101)
     while True:
         try:
             next_epoch_via_block(spec, state)
@@ -242,7 +244,9 @@ def test_random_inactivity_scores_full_participation_leaking(spec, state):
     assert spec.is_in_inactivity_leak(state)
 
 
-def slash_some_validators_for_inactivity_scores_test(spec, state, rng=Random(40404040)):
+def slash_some_validators_for_inactivity_scores_test(spec, state, rng=None):
+    if rng is None:
+        rng = Random(40404040)
     # ``run_inactivity_scores_test`` runs at the next epoch from `state`.
     # We retrieve the proposer of this future state to avoid
     # accidentally slashing that validator
@@ -377,7 +381,9 @@ def test_some_exited_full_random_leaking(spec, state):
     assert spec.is_in_inactivity_leak(state)
 
 
-def _run_randomized_state_test_for_inactivity_updates(spec, state, rng=Random(13377331)):
+def _run_randomized_state_test_for_inactivity_updates(spec, state, rng=None):
+    if rng is None:
+        rng = Random(13377331)
     randomize_inactivity_scores(spec, state, rng=rng)
     randomize_state(spec, state, rng=rng)
 

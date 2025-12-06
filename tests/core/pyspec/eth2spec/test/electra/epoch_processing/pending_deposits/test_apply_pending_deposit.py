@@ -1,12 +1,13 @@
 from eth2spec.test.context import (
+    always_bls,
     spec_state_test,
     with_electra_and_later,
-    always_bls,
 )
 from eth2spec.test.helpers.deposits import (
     prepare_pending_deposit,
     run_pending_deposit_applying,
 )
+from eth2spec.test.helpers.forks import is_post_gloas
 from eth2spec.test.helpers.state import next_epoch_via_block
 from eth2spec.test.helpers.withdrawals import set_validator_fully_withdrawable
 
@@ -332,25 +333,6 @@ def test_apply_pending_deposit_top_up__less_effective_balance(spec, state):
 
 @with_electra_and_later
 @spec_state_test
-def test_apply_pending_deposit_top_up__zero_balance(spec, state):
-    validator_index = 0
-    amount = spec.MIN_ACTIVATION_BALANCE // 4
-    pending_deposit = prepare_pending_deposit(spec, validator_index, amount, signed=True)
-
-    initial_balance = 0
-    initial_effective_balance = 0
-    state.balances[validator_index] = initial_balance
-    state.validators[validator_index].effective_balance = initial_effective_balance
-
-    yield from run_pending_deposit_applying(spec, state, pending_deposit, validator_index)
-
-    assert state.balances[validator_index] == initial_balance + amount
-    # unchanged effective balance
-    assert state.validators[validator_index].effective_balance == initial_effective_balance
-
-
-@with_electra_and_later
-@spec_state_test
 @always_bls
 def test_apply_pending_deposit_incorrect_sig_top_up(spec, state):
     validator_index = 0
@@ -515,6 +497,11 @@ def test_apply_pending_deposit_success_top_up_to_withdrawn_validator(spec, state
     # Fully withdraw validator
     set_validator_fully_withdrawable(spec, state, validator_index)
     assert state.balances[validator_index] > 0
+
+    # Make parent block full in Gloas so withdrawals are processed
+    if is_post_gloas(spec):
+        state.latest_block_hash = state.latest_execution_payload_bid.block_hash
+
     next_epoch_via_block(spec, state)
     assert state.balances[validator_index] == 0
     assert state.validators[validator_index].effective_balance > 0

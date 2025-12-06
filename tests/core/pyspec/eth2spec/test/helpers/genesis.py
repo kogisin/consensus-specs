@@ -1,7 +1,12 @@
 from hashlib import sha256
+
 from eth2spec.test.helpers.constants import (
     PHASE0,
     PREVIOUS_FORK_OF,
+)
+from eth2spec.test.helpers.eip7441 import (
+    compute_whisk_initial_k_commitment_cached,
+    compute_whisk_initial_tracker_cached,
 )
 from eth2spec.test.helpers.execution_payload import (
     compute_el_header_block_hash,
@@ -11,15 +16,12 @@ from eth2spec.test.helpers.forks import (
     is_post_bellatrix,
     is_post_capella,
     is_post_deneb,
-    is_post_electra,
     is_post_eip7441,
-    is_post_eip7732,
+    is_post_electra,
+    is_post_fulu,
+    is_post_gloas,
 )
 from eth2spec.test.helpers.keys import pubkeys
-from eth2spec.test.helpers.eip7441 import (
-    compute_whisk_initial_tracker_cached,
-    compute_whisk_initial_k_commitment_cached,
-)
 
 
 def build_mock_validator(spec, i: int, balance: int):
@@ -57,24 +59,35 @@ def build_mock_validator(spec, i: int, balance: int):
     return validator
 
 
-def get_post_eip7732_genesis_execution_payload_header(spec, slot, eth1_block_hash):
-    kzgs = spec.List[spec.KZGCommitment, spec.MAX_BLOB_COMMITMENTS_PER_BLOCK]()
-    header = spec.ExecutionPayloadHeader(
-        parent_block_hash=b"\x30" * 32,
-        parent_block_root=b"\x00" * 32,
-        block_hash=eth1_block_hash,
+def get_post_gloas_genesis_execution_payload_header(spec, slot, eth1_block_hash):
+    # For Gloas, use the standard ExecutionPayloadHeader from the parent fork
+    payload_header = spec.ExecutionPayloadHeader(
+        parent_hash=b"\x30" * 32,
+        fee_recipient=b"\x42" * 20,
+        state_root=b"\x20" * 32,
+        receipts_root=b"\x20" * 32,
+        logs_bloom=b"\x35" * spec.BYTES_PER_LOGS_BLOOM,
+        prev_randao=eth1_block_hash,
+        block_number=0,
         gas_limit=30000000,
-        slot=slot,
-        blob_kzg_commitments_root=kzgs.hash_tree_root(),
+        gas_used=0,
+        timestamp=0,
+        extra_data=b"",
+        base_fee_per_gas=1000000000,
+        block_hash=eth1_block_hash,
+        transactions_root=spec.Root(b"\x56" * 32),
+        withdrawals_root=spec.Root(b"\x56" * 32),
+        blob_gas_used=0,
+        excess_blob_gas=0,
     )
-    return header
+    return payload_header
 
 
 def get_sample_genesis_execution_payload_header(spec, slot, eth1_block_hash=None):
     if eth1_block_hash is None:
         eth1_block_hash = b"\x55" * 32
-    if is_post_eip7732(spec):
-        return get_post_eip7732_genesis_execution_payload_header(spec, slot, eth1_block_hash)
+    if is_post_gloas(spec):
+        return get_post_gloas_genesis_execution_payload_header(spec, slot, eth1_block_hash)
     payload_header = spec.ExecutionPayloadHeader(
         parent_hash=b"\x30" * 32,
         fee_recipient=b"\x42" * 20,
@@ -134,8 +147,6 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
         current_version = getattr(spec.config, f"{spec.fork.upper()}_FORK_VERSION")
 
     genesis_block_body = spec.BeaconBlockBody()
-    if is_post_eip7732(spec):
-        genesis_block_body.signed_execution_payload_header.message.block_hash = eth1_block_hash
 
     state = spec.BeaconState(
         genesis_time=0,
@@ -159,6 +170,7 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
     # We "hack" in the initial validators,
     #  as it is much faster than creating and processing genesis deposits for every single test case.
     state.balances = validator_balances
+
     state.validators = [
         build_mock_validator(spec, i, state.balances[i]) for i in range(len(validator_balances))
     ]
@@ -182,7 +194,10 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
         state.current_sync_committee = spec.get_next_sync_committee(state)
         state.next_sync_committee = spec.get_next_sync_committee(state)
 
-    if is_post_bellatrix(spec):
+    if is_post_gloas(spec):
+        # Initialize the latest_execution_payload_bid
+        genesis_block_body.signed_execution_payload_bid.message.block_hash = eth1_block_hash
+    elif is_post_bellatrix(spec):
         # Initialize the execution payload header (with block number and genesis time set to 0)
         state.latest_execution_payload_header = get_sample_genesis_execution_payload_header(
             spec,
@@ -215,11 +230,18 @@ def create_genesis_state(spec, validator_balances, activation_threshold):
         state.pending_partial_withdrawals = []
         state.pending_consolidations = []
 
-    if is_post_eip7732(spec):
-        withdrawals = spec.List[spec.Withdrawal, spec.MAX_WITHDRAWALS_PER_PAYLOAD]()
-        state.latest_withdrawals_root = withdrawals.hash_tree_root()
-        state.latest_block_hash = (
-            state.latest_execution_payload_header.block_hash
-        )  # last block is full
+    if is_post_gloas(spec):
+        state.execution_payload_availability = [0b1 for _ in range(spec.SLOTS_PER_HISTORICAL_ROOT)]
+        state.payload_expected_withdrawals = spec.List[
+            spec.Withdrawal, spec.MAX_WITHDRAWALS_PER_PAYLOAD
+        ]()
+        state.builder_pending_payments = [
+            spec.BuilderPendingPayment() for _ in range(2 * spec.SLOTS_PER_EPOCH)
+        ]
+        state.builder_pending_withdrawals = []
+
+    if is_post_fulu(spec):
+        # Initialize proposer lookahead list
+        state.proposer_lookahead = spec.initialize_proposer_lookahead(state)
 
     return state

@@ -9,10 +9,10 @@ from eth2spec.test.context import (
     with_state,
 )
 from eth2spec.test.helpers.constants import (
-    PHASE0,
+    ALL_PHASES,
     ALTAIR,
     BELLATRIX,
-    ALL_PHASES,
+    PHASE0,
 )
 from eth2spec.test.helpers.forks import is_post_fork
 
@@ -73,7 +73,6 @@ def test_config_override_matching_fork_epochs(spec, state):
         "ALTAIR_FORK_VERSION": "0x11111111",
         "BELLATRIX_FORK_EPOCH": 4,
     },
-    emit=False,
 )
 @with_state
 @with_matching_spec_config(emitted_fork=BELLATRIX)

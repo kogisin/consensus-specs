@@ -1,68 +1,69 @@
 from random import Random
-from eth2spec.utils import bls
 
-from eth2spec.test.helpers.state import (
-    get_balance,
-    state_transition_and_sign_block,
-    next_slot,
-    next_epoch,
-    next_epoch_via_block,
+from eth2spec.test.context import (
+    always_bls,
+    dump_skipping_message,
+    expect_assertion_error,
+    large_validator_set,
+    single_phase,
+    spec_state_test,
+    spec_test,
+    with_all_phases,
+    with_custom_state,
+    with_phases,
+    with_presets,
+)
+from eth2spec.test.helpers.attestations import get_valid_attestation
+from eth2spec.test.helpers.attester_slashings import (
+    get_indexed_attestation_participants,
+    get_max_attester_slashings,
+    get_valid_attester_slashing,
+    get_valid_attester_slashing_by_indices,
 )
 from eth2spec.test.helpers.block import (
-    build_empty_block_for_next_slot,
     build_empty_block,
+    build_empty_block_for_next_slot,
     sign_block,
     transition_unsigned_block,
 )
-from eth2spec.test.helpers.keys import pubkeys
-from eth2spec.test.helpers.attester_slashings import (
-    get_valid_attester_slashing_by_indices,
-    get_valid_attester_slashing,
-    get_indexed_attestation_participants,
-    get_max_attester_slashings,
-)
-from eth2spec.test.helpers.proposer_slashings import (
-    get_valid_proposer_slashing,
-    check_proposer_slashing_effect,
-)
-from eth2spec.test.helpers.attestations import get_valid_attestation
+from eth2spec.test.helpers.constants import MINIMAL, PHASE0
 from eth2spec.test.helpers.deposits import prepare_state_and_deposit
 from eth2spec.test.helpers.execution_payload import (
     build_empty_execution_payload,
-    build_empty_signed_execution_payload_header,
+    build_empty_signed_execution_payload_bid,
     compute_el_block_hash,
     compute_el_block_hash_for_block,
 )
-from eth2spec.test.helpers.voluntary_exits import prepare_signed_exits
+from eth2spec.test.helpers.forks import (
+    is_post_altair,
+    is_post_bellatrix,
+    is_post_capella,
+    is_post_electra,
+    is_post_fulu,
+    is_post_gloas,
+)
+from eth2spec.test.helpers.keys import pubkeys
 from eth2spec.test.helpers.multi_operations import (
     run_slash_and_exit,
     run_test_full_random_operations,
+)
+from eth2spec.test.helpers.proposer_slashings import (
+    check_proposer_slashing_effect,
+    get_valid_proposer_slashing,
+)
+from eth2spec.test.helpers.state import (
+    get_balance,
+    next_epoch,
+    next_epoch_via_block,
+    next_slot,
+    state_transition_and_sign_block,
 )
 from eth2spec.test.helpers.sync_committee import (
     compute_committee_indices,
     compute_sync_committee_participant_reward_and_penalty,
 )
-from eth2spec.test.helpers.constants import PHASE0, MINIMAL
-from eth2spec.test.helpers.forks import (
-    is_post_altair,
-    is_post_bellatrix,
-    is_post_electra,
-    is_post_capella,
-    is_post_eip7732,
-)
-from eth2spec.test.context import (
-    spec_test,
-    spec_state_test,
-    dump_skipping_message,
-    with_phases,
-    with_all_phases,
-    single_phase,
-    expect_assertion_error,
-    always_bls,
-    with_presets,
-    with_custom_state,
-    large_validator_set,
-)
+from eth2spec.test.helpers.voluntary_exits import prepare_signed_exits
+from eth2spec.utils import bls
 
 
 @with_all_phases
@@ -169,7 +170,7 @@ def process_and_sign_block_without_header_validations(spec, state, block):
         state_root=spec.Bytes32(),
         body_root=block.body.hash_tree_root(),
     )
-    if is_post_bellatrix(spec) and not is_post_eip7732(spec):
+    if is_post_bellatrix(spec) and not is_post_gloas(spec):
         if spec.is_execution_enabled(state, block.body):
             spec.process_execution_payload(state, block.body, spec.EXECUTION_ENGINE)
 
@@ -223,17 +224,17 @@ def test_invalid_parent_from_same_slot(spec, state):
     child_block = parent_block.copy()
     child_block.parent_root = state.latest_block_header.hash_tree_root()
 
-    if is_post_eip7732(spec):
-        child_block.body.signed_execution_payload_header = (
-            build_empty_signed_execution_payload_header(spec, state)
+    if is_post_gloas(spec):
+        child_block.body.signed_execution_payload_bid = build_empty_signed_execution_payload_bid(
+            spec, state
         )
     elif is_post_bellatrix(spec):
         child_block.body.execution_payload = build_empty_execution_payload(spec, state)
 
     child_block.parent_root = state.latest_block_header.hash_tree_root()
-    if is_post_eip7732(spec):
+    if is_post_gloas(spec):
         payload = build_empty_execution_payload(spec, state)
-        child_block.body.signed_execution_payload_header.message.block_hash = compute_el_block_hash(
+        child_block.body.signed_execution_payload_bid.message.block_hash = compute_el_block_hash(
             spec, payload, state
         )
     elif is_post_bellatrix(spec):
@@ -640,9 +641,6 @@ def test_invalid_duplicate_attester_slashing_same_block(spec, state):
     yield "post", None
 
 
-# TODO All AttesterSlashing tests should be adopted for SHARDING and later but helper support is not yet there
-
-
 @with_all_phases
 @spec_state_test
 def test_multiple_attester_slashings_no_overlap(spec, state):
@@ -770,6 +768,8 @@ def test_high_proposer_index(spec, state):
     # disable a good amount of validators to make the active count lower, for a faster test
     current_epoch = spec.get_current_epoch(state)
     for i in range(len(state.validators) // 3):
+        if is_post_fulu(spec) and i in state.proposer_lookahead:
+            continue
         state.validators[i].exit_epoch = current_epoch
 
     # skip forward, get brand new proposers
@@ -919,8 +919,6 @@ def test_attestation(spec, state):
     )
 
     index = 0
-    # if spec.fork == SHARDING:
-    #     TODO add shard data to block to vote on
 
     attestation = get_valid_attestation(spec, state, index=index, signed=True)
 
@@ -1010,12 +1008,6 @@ def test_duplicate_attestation_same_block(spec, state):
             spec.hash_tree_root(state.previous_epoch_participation)
             == pre_current_epoch_participation_root
         )
-
-
-# After SHARDING is enabled, a committee is computed for SHARD_COMMITTEE_PERIOD slots ago,
-# exceeding the minimal-config randao mixes memory size.
-# Applies to all voluntary-exit sanity block tests.
-# TODO: when integrating SHARDING tests, voluntary-exit tests may need to change.
 
 
 @with_all_phases

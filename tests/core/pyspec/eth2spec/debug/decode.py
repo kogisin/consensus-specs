@@ -1,22 +1,24 @@
 from typing import Any
+
 from eth2spec.utils.ssz.ssz_impl import hash_tree_root
 from eth2spec.utils.ssz.ssz_typing import (
-    uint,
+    boolean,
+    ByteList,
+    ByteVector,
     Container,
     List,
-    boolean,
-    Vector,
-    ByteVector,
-    ByteList,
+    ProgressiveList,
+    uint,
     Union,
+    Vector,
     View,
 )
 
 
 def decode(data: Any, typ):
-    if issubclass(typ, (uint, boolean)):
+    if issubclass(typ, uint | boolean):
         return typ(data)
-    elif issubclass(typ, (List, Vector)):
+    elif issubclass(typ, List | ProgressiveList | Vector):
         return typ(decode(element, typ.element_cls()) for element in data)
     elif issubclass(typ, ByteVector):
         return typ(bytes.fromhex(data[2:]))

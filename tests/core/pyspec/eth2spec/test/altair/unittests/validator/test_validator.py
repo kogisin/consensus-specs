@@ -1,24 +1,23 @@
 import random
 from collections import defaultdict
-from eth2spec.utils.ssz.ssz_typing import Bitvector
-from eth2spec.utils import bls
-from eth2spec.test.helpers.block import build_empty_block
-from eth2spec.test.helpers.keys import pubkey_to_privkey, privkeys, pubkeys
-from eth2spec.test.helpers.state import transition_to
-from eth2spec.test.helpers.sync_committee import compute_sync_committee_signature
+
 from eth2spec.test.context import (
     always_bls,
     spec_state_test,
     with_altair_and_later,
     with_presets,
-    with_all_phases_from_except,
 )
+from eth2spec.test.helpers.block import build_empty_block
 from eth2spec.test.helpers.constants import (
     MAINNET,
     MINIMAL,
-    ALTAIR,
-    EIP7805,
 )
+from eth2spec.test.helpers.forks import is_post_eip7805
+from eth2spec.test.helpers.keys import privkeys, pubkey_to_privkey, pubkeys
+from eth2spec.test.helpers.state import transition_to
+from eth2spec.test.helpers.sync_committee import compute_sync_committee_signature
+from eth2spec.utils import bls
+from eth2spec.utils.ssz.ssz_typing import Bitvector
 
 rng = random.Random(1337)
 
@@ -129,12 +128,16 @@ def test_process_sync_committee_contributions(spec, state):
     spec.process_block(state, block)
 
 
-@with_all_phases_from_except(ALTAIR, [EIP7805])
+@with_altair_and_later
 @spec_state_test
 @always_bls
 def test_get_sync_committee_message(spec, state):
     validator_index = 0
-    block_root = spec.Root(b"\x12" * 32)
+    block = spec.BeaconBlock(state_root=state.hash_tree_root())
+    block_root = spec.Root(block.hash_tree_root())
+    if is_post_eip7805(spec):
+        store = spec.get_forkchoice_store(state, block)
+        block_root = spec.get_attester_head(store, block_root)
     sync_committee_message = spec.get_sync_committee_message(
         state=state,
         block_root=block_root,

@@ -1,13 +1,15 @@
 from .constants import (
-    PHASE0,
     ALTAIR,
     BELLATRIX,
     CAPELLA,
     DENEB,
+    EIP7441,
+    EIP7805,
+    EIP7928,
     ELECTRA,
     FULU,
-    EIP7441,
-    EIP7732,
+    GLOAS,
+    PHASE0,
     PREVIOUS_FORK_OF,
 )
 
@@ -52,12 +54,20 @@ def is_post_fulu(spec):
     return is_post_fork(spec.fork, FULU)
 
 
+def is_post_gloas(spec):
+    return is_post_fork(spec.fork, GLOAS)
+
+
 def is_post_eip7441(spec):
     return is_post_fork(spec.fork, EIP7441)
 
 
-def is_post_eip7732(spec):
-    return is_post_fork(spec.fork, EIP7732)
+def is_post_eip7805(spec):
+    return is_post_fork(spec.fork, EIP7805)
+
+
+def is_post_eip7928(spec):
+    return is_post_fork(spec.fork, EIP7928)
 
 
 def get_spec_for_fork_version(spec, fork_version, phases):
@@ -70,7 +80,7 @@ def get_spec_for_fork_version(spec, fork_version, phases):
             fork_version_field = fork.upper() + "_FORK_VERSION"
         if fork_version == getattr(spec.config, fork_version_field):
             return phases[fork]
-    raise ValueError("Unknown fork version %s" % fork_version)
+    raise ValueError(f"Unknown fork version {fork_version}")
 
 
 def get_next_fork_transition(spec, epoch, phases):

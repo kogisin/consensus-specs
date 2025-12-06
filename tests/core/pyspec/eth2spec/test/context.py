@@ -1,45 +1,48 @@
-import pytest
+import importlib
+from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-import importlib
+from random import Random
+from typing import Any
+
+import pytest
+from frozendict import frozendict
+from lru import LRU
 
 from eth2spec.utils import bls
+from tests.infra.yield_generator import vector_test
 
 from .exceptions import SkippedTest
 from .helpers.constants import (
-    PHASE0,
+    ALL_PHASES,
+    ALLOWED_TEST_RUNNER_FORKS,
     ALTAIR,
     BELLATRIX,
     CAPELLA,
     DENEB,
+    EIP7441,
+    EIP7805,
+    EIP7928,
     ELECTRA,
     FULU,
-    EIP7441,
-    EIP7732,
-    MINIMAL,
-    ALL_PHASES,
-    POST_FORK_OF,
-    ALLOWED_TEST_RUNNER_FORKS,
+    GLOAS,
     LIGHT_CLIENT_TESTING_FORKS,
+    MINIMAL,
+    PHASE0,
+    POST_FORK_OF,
 )
-from .helpers.forks import is_post_fork, is_post_electra
+from .helpers.forks import is_post_electra, is_post_fork
 from .helpers.genesis import create_genesis_state
+from .helpers.specs import (
+    spec_targets,
+)
 from .helpers.typing import (
     Spec,
     SpecForks,
 )
-from .helpers.specs import (
-    spec_targets,
-)
 from .utils import (
-    vector_test,
     with_meta_tags,
 )
-
-from random import Random
-from typing import Any, Callable, Sequence, Dict
-
-from lru import LRU
 
 # Without pytest CLI arg or pyspec-test-generator 'preset' argument, this will be the config to apply.
 DEFAULT_TEST_PRESET = MINIMAL
@@ -251,6 +254,16 @@ def low_single_balance(spec: Spec):
     return [1]
 
 
+def one_validator_one_gwei_balances(spec: Spec):
+    """
+    Helper method to create a single validator with 1 Gwei balance,
+    among other validators with default balances.
+    """
+    balances = default_balances(spec)
+    balances[0] = 1
+    return balances
+
+
 def large_validator_set(spec: Spec):
     """
     Helper method to create a large series of default balances.
@@ -294,7 +307,7 @@ is_pytest = True
 def dump_skipping_message(reason: str) -> None:
     message = f"[Skipped test] {reason}"
     if is_pytest:
-        pytest.skip(message)
+        pytest.skip(message, allow_module_level=True)
     else:
         raise SkippedTest(message)
 
@@ -312,7 +325,7 @@ def spec_test(fn):
     # A test may apply BLS overrides such as @always_bls,
     #  but if it yields data (n.b. @always_bls yields the bls setting), it should be wrapped by this decorator.
     #  This is why @always_bls has its own bls switch, since the override is beyond the reach of the outer switch.
-    return vector_test()(bls_switch(fn))
+    return vector_test(bls_switch(fn))
 
 
 # shorthand for decorating @spec_test @with_state @single_phase
@@ -321,7 +334,7 @@ def spec_state_test(fn):
 
 
 def spec_configured_state_test(conf):
-    overrides = with_config_overrides(conf)
+    overrides = _with_config_overrides_emit(conf)
 
     def decorator(fn):
         return spec_test(overrides(with_state(single_phase(fn))))
@@ -356,7 +369,7 @@ def with_matching_spec_config(emitted_fork=None):
     def decorator(fn):
         def wrapper(*args, spec: Spec, **kw):
             overrides = config_fork_epoch_overrides(spec, kw["state"])
-            deco = with_config_overrides(overrides, emitted_fork)
+            deco = _with_config_overrides_emit(overrides, emitted_fork)
             return deco(fn)(*args, spec=spec, **kw)
 
         return wrapper
@@ -431,25 +444,6 @@ def bls_switch(fn):
     return entry
 
 
-def disable_process_reveal_deadlines(fn):
-    """
-    Decorator to make a function execute with `process_reveal_deadlines` OFF.
-    This is for testing long-range epochs transition without considering the reveal-deadline slashing effect.
-    """
-
-    def entry(*args, spec: Spec, **kw):
-        if hasattr(spec, "process_reveal_deadlines"):
-            old_state = spec.process_reveal_deadlines
-            spec.process_reveal_deadlines = lambda state: None
-
-        yield from fn(*args, spec=spec, **kw)
-
-        if hasattr(spec, "process_reveal_deadlines"):
-            spec.process_reveal_deadlines = old_state
-
-    return with_meta_tags({"reveal_deadlines_setting": 1})(entry)
-
-
 def with_all_phases(fn):
     """
     A decorator for running a test with every phase
@@ -519,6 +513,8 @@ def with_all_phases_from_to_except(earliest_phase, latest_phase, except_phases=N
                 and not is_post_fork(phase, latest_phase)
             ]
         )(fn)
+
+    return decorator
 
 
 def with_all_phases_except(exclusion_phases):
@@ -606,7 +602,10 @@ def with_phases(phases, other_phases=None):
                     # When running test generator, it sets specific `phase`
                     phase = kw["phase"]
                     _phases = [phase]
-                    _other_phases = [POST_FORK_OF[phase]]
+                    if phase in POST_FORK_OF:
+                        _other_phases = [POST_FORK_OF[phase]]
+                    else:
+                        _other_phases = None
                     ret = _run_test_case_with_phases(
                         fn, _phases, _other_phases, kw, args, is_fork_transition=True
                     )
@@ -654,33 +653,32 @@ with_capella_and_later = with_all_phases_from(CAPELLA)
 with_deneb_and_later = with_all_phases_from(DENEB)
 with_electra_and_later = with_all_phases_from(ELECTRA)
 with_fulu_and_later = with_all_phases_from(FULU, all_phases=ALLOWED_TEST_RUNNER_FORKS)
+with_gloas_and_later = with_all_phases_from(GLOAS, all_phases=ALLOWED_TEST_RUNNER_FORKS)
 with_eip7441_and_later = with_all_phases_from(EIP7441, all_phases=ALLOWED_TEST_RUNNER_FORKS)
+with_eip7805_and_later = with_all_phases_from(EIP7805, all_phases=ALLOWED_TEST_RUNNER_FORKS)
+with_eip7928_and_later = with_all_phases_from(EIP7928, all_phases=ALLOWED_TEST_RUNNER_FORKS)
 
-with_altair_until_eip7732 = with_all_phases_from_to(ALTAIR, EIP7732)
-with_bellatrix_until_eip7732 = with_all_phases_from_to(BELLATRIX, EIP7732)
-with_capella_until_eip7732 = with_all_phases_from_to(CAPELLA, EIP7732)
-with_deneb_until_eip7732 = with_all_phases_from_to(DENEB, EIP7732)
-with_electra_until_eip7732 = with_all_phases_from_to(ELECTRA, EIP7732)
+with_bellatrix_only = with_phases([BELLATRIX])
 
 
 class quoted_str(str):
     pass
 
 
-def _get_basic_dict(ssz_dict: Dict[str, Any]) -> Dict[str, Any]:
+def _get_basic_value(v: Any) -> Any:
     """
-    Get dict of basic types from a dict of SSZ objects.
+    Deeply convert a value to a form consisting of Python built-in types.
     """
-    result = {}
-    for k, v in ssz_dict.items():
-        if isinstance(v, int):
-            value = int(v)
-        elif isinstance(v, bytes):
-            value = bytes(bytearray(v))
-        else:
-            value = quoted_str(v)
-        result[k] = value
-    return result
+    if isinstance(v, int):
+        return int(v)
+    elif isinstance(v, bytes):
+        return bytes(bytearray(v))
+    elif isinstance(v, list | tuple):
+        return list(_get_basic_value(v) for v in v)
+    elif isinstance(v, dict | frozendict):
+        return dict({k: _get_basic_value(v) for k, v in dict(v).items()})
+    else:
+        return quoted_str(v)
 
 
 def get_copy_of_spec(spec):
@@ -708,12 +706,41 @@ def spec_with_config_overrides(spec, config_overrides):
 
     # To output the changed config in a format compatible with yaml test vectors,
     # the dict SSZ objects have to be converted into Python built-in types.
-    output_config = _get_basic_dict(modified_config)
+    output_config = _get_basic_value(modified_config)
 
     return spec, output_config
 
 
-def with_config_overrides(config_overrides, emitted_fork=None, emit=True):
+def with_config_overrides(config_overrides):
+    """
+    WARNING: the spec_test decorator must wrap this, to ensure the decorated test actually runs.
+
+    This is a decorator that applies a dict of config value overrides to the spec during execution.
+    """
+
+    def decorator(fn):
+        def wrapper(*args, spec: Spec, **kw):
+            # Apply config overrides to spec
+            spec, _ = spec_with_config_overrides(get_copy_of_spec(spec), config_overrides)
+
+            # Apply config overrides to additional phases, if present
+            if "phases" in kw:
+                phases = {}
+                for fork in kw["phases"]:
+                    phases[fork], _ = spec_with_config_overrides(
+                        get_copy_of_spec(kw["phases"][fork]), config_overrides
+                    )
+                kw["phases"] = phases
+
+            # Run the function
+            return fn(*args, spec=spec, **kw)
+
+        return wrapper
+
+    return decorator
+
+
+def _with_config_overrides_emit(config_overrides, emitted_fork=None):
     """
     WARNING: the spec_test decorator must wrap this, to ensure the decorated test actually runs.
     This decorator forces the test to yield, and pytest doesn't run generator tests, and instead silently passes it.
@@ -741,8 +768,7 @@ def with_config_overrides(config_overrides, emitted_fork=None, emit=True):
                 kw["phases"] = phases
 
             # Emit requested spec (with overrides)
-            if emit:
-                yield "config", "cfg", output_config
+            yield "config", "cfg", output_config
 
             # Run the function
             out = fn(*args, spec=spec, **kw)
